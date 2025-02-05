@@ -1,0 +1,13 @@
+cga
+===
+genetic algorithm in c
+
+
+Run
+---
+run
+  git clone https://github.com/retpoison/cga.git
+  cd cga
+  make
+  ./main
+
