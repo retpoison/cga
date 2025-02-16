@@ -1,51 +1,81 @@
 #ifndef __SGA__
 #define __SGA__
 
-#include "bitset.h"
+#define RAND01() ((double)rand() / (double)((unsigned)RAND_MAX + 1))
 
-#define RAND01 ((double)rand() / (double)((unsigned)RAND_MAX + 1))
+#define DIFFRAND(R1, R2, MAX) \
+  do { \
+    R1 = rand() % MAX; \
+    do { \
+      R2 = rand() % MAX; \
+    } while (R1 == R2); \
+  } while(0)
 
-/*  population  */
-#define POP               1000
-#define ITEM_NUM          22
-#define WEIGHT_LIMIT      100
-#define CROSSOVER_RATE    0.5
-#define MUTATION_RATE     0.01
-#define REPRODUCTION_RATE 0.01
-#define MAX_ITTER         1000
+struct sga_individual {
+	double *chrom;
+	double fitness;
+};
 
-typedef struct {
-	sbs_bitset c;
-	int fitness, weight, value;
-} chromosome;
+struct sga_generation {
+	struct sga_individual *individuals;
+	uint32_t individual_size;
+	uint32_t num_population;
+};
 
-typedef struct {
-	char *name;
-	int weight;
-	int value;
-} Item;
+struct sga_ga {
+	uint32_t num_population;
+	uint32_t num_generation;
+	uint32_t num_parents;
+	uint32_t individual_size;
+	int init_best;
+	struct sga_individual best;
+	struct sga_individual *last_gen;
+	double crossover_rate;
+	double mutation_rate;
+	double reproduction_rate;
 
-void init_generation(chromosome * gen);
-void make_new_generation(chromosome * gen,
-			 chromosome * next_gen, Item * item_list);
-void make_first_generation(chromosome * gen, Item * item_list);
+	double (*rand)();
+	void (*select_parent)(struct sga_generation * gen,
+			      struct sga_individual ** p1,
+			      struct sga_individual ** p2);
+	double (*fitness_func)(struct sga_generation * gen,
+			       struct sga_individual * indv, int index);
 
-void init_chrom(chromosome * a, size_t s);
-void make_chrom_zero(chromosome * chrom);
-void cleanup_chrom(chromosome * a);
-void cleanup_generation(chromosome * gen);
+	void (*mutate)(struct sga_generation * gen, struct sga_individual * a);
+	void (*crossover)(struct sga_generation * gen,
+			  struct sga_individual * p1,
+			  struct sga_individual * p2,
+			  struct sga_individual * child);
 
-void calculate_fitness(chromosome * gen, Item * item_list);
-void mutate(chromosome * out);
-void crossover(chromosome a, chromosome b,
-	       chromosome * out1, chromosome * out2);
-void move_to_next_generation(chromosome a, chromosome * out);
-void copy_generation(chromosome * dst, chromosome * src);
-void copy_chrom(chromosome * dst, chromosome * src);
+};
 
-void out(chromosome * gen);
-void get_best(chromosome * gen, chromosome * best);
-void out_best(chromosome * gen, Item * item_list);
-void outb(chromosome * a);
+struct sga_ga *sga_new_ga();
+int sga_run(struct sga_ga *ga);
+void sga_first_generation(struct sga_ga *ga, struct sga_generation *gen);
+void sga_new_generation(struct sga_ga *ga,
+			struct sga_generation *gen1,
+			struct sga_generation *gen2);
+
+void sga_set_best(struct sga_ga *ga, struct sga_generation *gen);
+void sga_init_individual(struct sga_individual *a, uint32_t s);
+void sga_init_generation(struct sga_ga *ga, struct sga_generation *gen);
+void sga_copy_individual(struct sga_individual *dst,
+			 struct sga_individual *src, uint32_t s);
+void sga_copy_generation(struct sga_generation *dst,
+			 struct sga_generation *src);
+
+void sga_delete_individual(struct sga_individual *a);
+void sga_delete_generation(struct sga_generation *gen);
+void sga_delete_ga(struct sga_ga *ga);
+
+double sga_rand(void);
+void sga_select_parent(struct sga_generation *gen,
+		       struct sga_individual **p1, struct sga_individual **p2);
+double sga_fitness(struct sga_generation *gen,
+		   struct sga_individual *indv, int index);
+void sga_mutate(struct sga_generation *gen, struct sga_individual *a);
+void sga_crossover(struct sga_generation *gen,
+		   struct sga_individual *p1, struct sga_individual *p2,
+		   struct sga_individual *child);
 
 #endif				/* __SGA__ */

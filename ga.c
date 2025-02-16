@@ -5,225 +5,241 @@
 #include <string.h>
 
 #include "ga.h"
-#define SBS_BITSET_IMPLEMENTATION
-#include "bitset.h"
 
-void
-init_generation(chromosome * gen)
+static int
+check_functions(struct sga_ga *ga)
 {
-	size_t s = (ITEM_NUM / sbs_typelen) + 1;
-	int i;
-	for (i = 0; i < POP; i++) {
-		init_chrom(&gen[i], s);
+	if (ga->select_parent == NULL) {
+		fprintf(stderr, "select_parent function is not provided\n");
+		return 1;
 	}
+	if (ga->fitness_func == NULL) {
+		fprintf(stderr, "fitness_func function is not provided\n");
+		return 1;
+	}
+	if (ga->mutate == NULL) {
+		fprintf(stderr, "mutate function is not provided\n");
+		return 1;
+	}
+	if (ga->crossover == NULL) {
+		fprintf(stderr, "crossover function is not provided\n");
+		return 1;
+	}
+	return 0;
 }
 
-void
-make_new_generation(chromosome * gen, chromosome * next_gen, Item * item_list)
+struct sga_ga *
+sga_new_ga()
 {
-	int i, r1, r2;
-	int p = ((POP & 1) == 1) ? POP - 1 : POP;
-	for (i = 0; i < p; i += 2) {
-		make_chrom_zero(&next_gen[i]);
-		make_chrom_zero(&next_gen[i + 1]);
-		r1 = rand() % POP;
-		r2 = rand() % POP;
-		if (RAND01 < REPRODUCTION_RATE) {
-			move_to_next_generation(gen[r1], &next_gen[i]);
-			move_to_next_generation(gen[r2], &next_gen[i + 1]);
-		} else if (RAND01 < CROSSOVER_RATE) {
-			crossover(gen[r1], gen[r2], &next_gen[i],
-				  &next_gen[i + 1]);
+	struct sga_ga *ga;
+	ga = (struct sga_ga *)malloc(sizeof(struct sga_ga));
+	ga->num_population = 1000;
+	ga->num_generation = 100;
+	ga->num_parents = 2;
+	ga->individual_size = 0;
+	ga->init_best = 0;
+	ga->crossover_rate = 0.5;
+	ga->mutation_rate = 0.01;
+	ga->reproduction_rate = 0.01;
+	ga->rand = sga_rand;
+	ga->select_parent = sga_select_parent;
+	ga->fitness_func = NULL;
+	ga->mutate = sga_mutate;
+	ga->crossover = sga_crossover;
+
+	return ga;
+}
+
+int
+sga_run(struct sga_ga *ga)
+{
+	if (check_functions(ga) != 0)
+		return 1;
+
+	srand(time(NULL));
+	sga_init_individual(&ga->best, ga->individual_size);
+	ga->init_best = 1;
+
+	struct sga_generation gen1, gen2;
+	sga_init_generation(ga, &gen1);
+	sga_init_generation(ga, &gen2);
+
+	sga_first_generation(ga, &gen1);
+
+	sga_set_best(ga, &gen1);
+	uint32_t i;
+	for (i = 0; i < ga->num_generation; i++) {
+		if ((i & 1) == 0) {
+			sga_new_generation(ga, &gen1, &gen2);
+			sga_set_best(ga, &gen2);
+		} else {
+			sga_new_generation(ga, &gen2, &gen1);
+			sga_set_best(ga, &gen1);
 		}
-		if (RAND01 < MUTATION_RATE) {
-			mutate(&next_gen[i]);
-			mutate(&next_gen[i + 1]);
+	}
+
+	sga_delete_generation(&gen1);
+	sga_delete_generation(&gen2);
+
+	return 0;
+}
+
+void
+sga_first_generation(struct sga_ga *ga, struct sga_generation *gen)
+{
+	uint32_t i, j;
+
+	for (i = 0; i < gen->num_population; i++) {
+		for (j = 0; j < gen->individual_size; j++) {
+			gen->individuals[i].chrom[j] = ga->rand();
 		}
-		calculate_fitness(&next_gen[i], item_list);
-		calculate_fitness(&next_gen[i + 1], item_list);
+		gen->individuals[i].fitness =
+		    ga->fitness_func(gen, &gen->individuals[i], i);
 	}
-
-	for (; i < POP; i++)
-		move_to_next_generation(gen[i], &next_gen[i]);
 }
 
 void
-make_first_generation(chromosome * gen, Item * item_list)
+sga_new_generation(struct sga_ga *ga,
+		   struct sga_generation *gen1, struct sga_generation *gen2)
 {
-	int i, j;
-	for (i = 0; i < POP; i++) {
-		for (j = 0; j < ITEM_NUM; j++) {
-			if (rand() & 1)
-				sbs_set_bit(&gen[i].c, j);
-			else
-				sbs_clr_bit(&gen[i].c, j);
+	uint32_t i;
+	struct sga_individual *parent1, *parent2;
+
+	for (i = 0; i < gen2->num_population; i++) {
+		ga->select_parent(gen1, &parent1, &parent2);
+
+		if (RAND01() < ga->reproduction_rate) {
+			sga_copy_individual(&gen2->individuals[i],
+					    parent1, gen2->individual_size);
+		} else if (RAND01() < ga->crossover_rate) {
+			ga->crossover(gen2, parent1, parent2,
+				      &gen2->individuals[i]);
 		}
-		calculate_fitness(&gen[i], item_list);
+		if (RAND01() < ga->mutation_rate) {
+			ga->mutate(gen2, &gen2->individuals[i]);
+		}
+		gen2->individuals[i].fitness =
+		    ga->fitness_func(gen2, &gen2->individuals[i], i);
 	}
 }
 
 void
-init_chrom(chromosome * a, size_t s)
+sga_set_best(struct sga_ga *ga, struct sga_generation *gen)
 {
-	sbs_set_size(&a->c, s);
-	sbs_init_bitset(&a->c);
-	make_chrom_zero(a);
-}
-
-void
-make_chrom_zero(chromosome * chrom)
-{
-	chrom->fitness = 0;
-	chrom->weight = 0;
-	chrom->value = 0;
-}
-
-void
-cleanup_chrom(chromosome * a)
-{
-	sbs_free_bitset(&a->c);
-}
-
-void
-cleanup_generation(chromosome * gen)
-{
-	int i;
-	for (i = 0; i < POP; i++) {
-		cleanup_chrom(&gen[i]);
+	uint32_t i;
+	struct sga_individual *max = &gen->individuals[0];
+	for (i = 1; i < gen->num_population; i++) {
+		if (gen->individuals[i].fitness > max->fitness)
+			max = &gen->individuals[i];
 	}
-	gen = NULL;
-}
-
-void
-calculate_fitness(chromosome * gen, Item * item_list)
-{
-	int i;
-	for (i = 0; i < ITEM_NUM; i++) {
-		if (!(sbs_get_bit(&gen->c, i)))
-			continue;
-		gen->value += item_list[i].value;
-		gen->weight += item_list[i].weight;
-	}
-	if (gen->weight <= WEIGHT_LIMIT)
-		gen->fitness = gen->value;
-}
-
-void
-mutate(chromosome * out)
-{
-	int r = rand() % ITEM_NUM;
-	if (sbs_get_bit(&out->c, r))
-		sbs_clr_bit(&out->c, r);
-	else
-		sbs_set_bit(&out->c, r);
-}
-
-void
-crossover(chromosome a, chromosome b, chromosome * out1, chromosome * out2)
-{
-	int point = (rand() % (ITEM_NUM - 2)) + 1;
-	int i;
-	for (i = 0; i < ITEM_NUM - point; i++) {
-		if (sbs_get_bit(&a.c, i))
-			sbs_set_bit(&out1->c, i);
-		else
-			sbs_clr_bit(&out1->c, i);
-
-		if (sbs_get_bit(&b.c, i))
-			sbs_set_bit(&out2->c, i);
-		else
-			sbs_clr_bit(&out2->c, i);
-	}
-	for (; i < ITEM_NUM; i++) {
-		if (sbs_get_bit(&b.c, i))
-			sbs_set_bit(&out1->c, i);
-		else
-			sbs_clr_bit(&out1->c, i);
-
-		if (sbs_get_bit(&a.c, i))
-			sbs_set_bit(&out2->c, i);
-		else
-			sbs_clr_bit(&out2->c, i);
+	if (max->fitness > ga->best.fitness) {
+		sga_copy_individual(&ga->best, max, gen->individual_size);
 	}
 }
 
 void
-move_to_next_generation(chromosome a, chromosome * out)
+sga_init_individual(struct sga_individual *a, uint32_t s)
 {
-	copy_chrom(&a, out);
+	a->chrom = (double *)calloc(s, sizeof(double));
+	a->fitness = 0;
 }
 
 void
-copy_generation(chromosome * dst, chromosome * src)
+sga_init_generation(struct sga_ga *ga, struct sga_generation *gen)
 {
-	int i;
-	for (i = 0; i < POP; i++) {
-		copy_chrom(&dst[i], &src[i]);
+	uint32_t i;
+
+	gen->num_population = ga->num_population;
+	gen->individual_size = ga->individual_size;
+	gen->individuals = (struct sga_individual *)
+	    malloc(gen->num_population * sizeof(struct sga_individual));
+	for (i = 0; i < gen->num_population; i++) {
+		sga_init_individual(&gen->individuals[i], gen->individual_size);
 	}
 }
 
 void
-copy_chrom(chromosome * dst, chromosome * src)
+sga_copy_individual(struct sga_individual *dst,
+		    struct sga_individual *src, uint32_t s)
 {
-	memcpy(dst->c.bits, src->c.bits, sizeof(dst->c.size) * dst->c.size);
+	memcpy(dst->chrom, src->chrom, s * sizeof(double));
 	dst->fitness = src->fitness;
-	dst->weight = src->weight;
-	dst->value = src->value;
 }
 
 void
-out(chromosome * gen)
+sga_copy_generation(struct sga_generation *dst, struct sga_generation *src)
 {
-	int i, j, max = 0;
-	for (i = 0; i < POP; i++) {
-		for (j = 0; j < ITEM_NUM; j++) {
-			printf("%d", sbs_get_bit(&gen[i].c, j));
-		}
-		if (gen[i].fitness > max)
-			max = gen[i].fitness;
-		printf(" f%d p%d w%d\n", gen[i].fitness,
-		       gen[i].value, gen[i].weight);
+	uint32_t i;
+	for (i = 0; i < dst->num_population; i++) {
+		sga_copy_individual(&dst->individuals[i],
+				    &src->individuals[i], dst->individual_size);
 	}
-	printf("max: %d\n", max);
 }
 
 void
-get_best(chromosome * gen, chromosome * best)
+sga_delete_individual(struct sga_individual *a)
 {
-	int i;
-	chromosome *max = &gen[0];
-	for (i = 1; i < POP; i++) {
-		if (gen[i].fitness > max->fitness)
-			max = &gen[i];
-	}
-	if (max->fitness > best->fitness)
-		copy_chrom(best, max);
+	free(a->chrom);
 }
 
 void
-out_best(chromosome * ch, Item * item_list)
+sga_delete_generation(struct sga_generation *gen)
 {
-	int i, j = 1;
-	printf("num\t\tname\t\tweight\t\tvalue\n");
-	for (i = 0; i < ITEM_NUM; i++) {
-		if (sbs_get_bit(&ch->c, i)) {
-			printf("%d\t%-20s\t%d\t\t%d\n", j, item_list[i].name,
-			       item_list[i].weight, item_list[i].value);
-			j++;
-		}
+	uint32_t i;
+	for (i = 0; i < gen->num_population; i++) {
+		sga_delete_individual(&gen->individuals[i]);
 	}
-//  outb(ch);
-	printf("chromosome:\n");
-	printf("fitness: %d\nvalues: %d\nweight:%d\n",
-	       ch->fitness, ch->value, ch->weight);
+	free(gen->individuals);
 }
 
 void
-outb(chromosome * a)
+sga_delete_ga(struct sga_ga *ga)
 {
-	size_t i;
-	for (i = 0; i < sbs_typelen; i++) {
-		printf("%d", sbs_get_bit(&a->c, i));
-	}
-	printf("\n");
+	if (ga->init_best)
+		free(ga->best.chrom);
+	free(ga);
+}
+
+double
+sga_rand(void)
+{
+	return (double)rand();
+}
+
+void
+sga_select_parent(struct sga_generation *gen,
+		  struct sga_individual **p1, struct sga_individual **p2)
+{
+	int r1, r2;
+
+	DIFFRAND(r1, r2, gen->num_population);
+	*p1 = &gen->individuals[r1];
+	*p2 = &gen->individuals[r2];
+}
+
+void
+sga_mutate(struct sga_generation *gen, struct sga_individual *a)
+{
+	int r1, r2;
+	double tmp;
+
+	DIFFRAND(r1, r2, gen->individual_size);
+	tmp = a->chrom[r1];
+	a->chrom[r1] = a->chrom[r2];
+	a->chrom[r2] = tmp;
+}
+
+void
+sga_crossover(struct sga_generation *gen,
+	      struct sga_individual *p1, struct sga_individual *p2,
+	      struct sga_individual *child)
+{
+	int point, s;
+
+	point = (rand() % (gen->individual_size - 2)) + 1;
+	s = sizeof(double);
+
+	memcpy(child->chrom, p1->chrom, point * s);
+	memcpy(child->chrom + point, p2->chrom,
+	       (gen->individual_size - point) * s);
 }

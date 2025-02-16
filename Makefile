@@ -1,13 +1,15 @@
 CC = gcc
 CFLAGS = -std=c99 -pedantic -Wall -Wno-unused-parameter -O2
 
-all: main
+EX = example1 example2
+
+all: $(EX)
 
 ga.o: ga.c
 	$(CC) -o $@ -c $(CFLAGS) $^
 
-main:	main.c ga.o
-	$(CC) $(CFLAGS) -o $@ -s $^
+$(EX): ga.o
+	$(CC) $(CFLAGS) -o $@ -s $^ $@.c
 
 clean:
-	rm -vf main *.o
+	rm -vf $(EX) *.o
