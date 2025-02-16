@@ -1,7 +1,7 @@
 cga
 ===
 genetic algorithm in c
-
+There are two examples (example1.c and example2.c) that shows how the algorithm can be used. 
 
 Run
 ---
@@ -9,5 +9,6 @@ run
   git clone https://github.com/retpoison/cga.git
   cd cga
   make
-  ./main
+  ./example1
+  ./example2
 
